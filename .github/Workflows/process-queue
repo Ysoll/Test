@@ -18,14 +18,14 @@ jobs:
       - name: Pick RC Branch from Queue (FIFO)
         id: pick_branch
         run: |
-          if [ ! -s branches-queue.txt ]; then
+          if [ ! -s rc_queue.json ]; then
             echo "No branches in the queue"
             exit 0
           fi
-          rc_branch=$(head -n 1 branches-queue.txt)
+          rc_branch=$(head -n 1 rc_queue.json)
           echo "Picked RC branch: $rc_branch"
-          sed -i '1d' branches-queue.txt
-          git add branches-queue.txt
+          sed -i '1d' rc_queue.json
+          git add rc_queue.json
           git commit -m "Processing $rc_branch and removing it from the queue"
           git push origin HEAD
           echo "::set-output name=rc_branch::$rc_branch"
