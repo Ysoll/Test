@@ -2,7 +2,8 @@ name: Process Deployment Queue
 
 on:
   schedule:
-    - cron: "*/1 * * * *"  # Runs every minute (for testing)
+    # Runs every 30 minutes from 9 AM to 5 PM (NL time) from Monday to Friday
+    - cron: "0,30 8-16 * * 1-5"  # Adjusted for CET/CEST timezone (UTC)
   workflow_dispatch:  # Allows manual triggering
 
 jobs:
@@ -25,7 +26,15 @@ jobs:
         run: |
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
 
-      # Step 4: Read queue and get the first RC branch (FIFO)
+      # Step 4: Post the queue status to Microsoft Teams in the morning
+      - name: Post queue status to Microsoft Teams
+        run: |
+          queue_status=$(jq '.queue' rc_queue.json)
+          curl -H 'Content-Type: application/json' \
+               -d '{"text": "Good morning! Here is the current deployment queue:\n'"$queue_status"'"}' \
+               ${{ secrets.TEAMS_WEBHOOK_URL }}
+
+      # Step 5: Read queue and get the first RC branch (FIFO)
       - name: Read queue and get the first RC branch
         id: get_queue
         run: |
@@ -37,7 +46,7 @@ jobs:
           echo "Picked branch: $queue_branch"
           echo "::set-output name=branch::$queue_branch"
 
-      # Step 5: Sync RC branch with master
+      # Step 6: Sync RC branch with master
       - name: Sync RC branch with master
         id: merge_master
         run: |
@@ -72,3 +81,13 @@ jobs:
           fi
           set -e  # Re-enable exit on error
           echo "::set-output name=conflict::false"
+
+      # Step 7: Post next deployment to Microsoft Teams after each deployment
+      - name: Post next deployment to Microsoft Teams
+        run: |
+          next_branch=$(jq -r '.queue[0]' rc_queue.json)
+          curl -H 'Content-Type: application/json' \
+               -d '{"text": "The next RC branch to be deployed is: '"$next_branch"'"}' \
+               ${{ secrets.TEAMS_WEBHOOK_URL }}
+
+      # Continue with further deployment or release logic...
