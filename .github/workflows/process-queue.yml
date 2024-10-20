@@ -41,7 +41,7 @@ jobs:
           echo "Picked branch: $queue_branch"
           echo "::set-output name=branch::$queue_branch"
 
-      # Step 5: Sync remote RC branch with master and pull latest changes before pushing
+      # Step 5: Sync remote RC branch with master and allow unrelated histories
       - name: Sync remote RC branch with master
         id: merge_master
         run: |
@@ -68,9 +68,9 @@ jobs:
           # Push the branch to remote
           git push origin $branch || exit 1
 
-          # Merge master into the branch
+          # Merge master into the branch with --allow-unrelated-histories flag
           git fetch origin master
-          git merge origin/master --no-edit
+          git merge origin/master --no-edit --allow-unrelated-histories
 
           if [ $? -ne 0 ]; then
             echo "Merge conflict detected in branch: $branch, aborting."
@@ -80,3 +80,22 @@ jobs:
             echo "::set-output name=conflict::false"
           fi
         continue-on-error: true  # Allow the workflow to continue even if there's an error
+
+      # Step 6: Handle merge conflict and skip to the next branch
+      - name: Skip to the next branch if conflict
+        if: ${{ steps.merge_master.outputs.conflict == 'true' }}
+        run: |
+          branch="${{ steps.get_queue.outputs.branch }}"
+          # Remove the first branch from the queue
+          jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
+          git add rc_queue.json
+          git commit -m "Removed $branch due to merge conflict"
+          git push origin main
+          echo "Skipped branch: $branch due to conflict, picking the next branch."
+
+      # Step 7: Process the next branch if no conflict
+      - name: Continue with next branch if no conflict
+        if: ${{ steps.merge_master.outputs.conflict == 'false' }}
+        run: |
+          echo "Successfully processed branch: ${{ steps.get_queue.outputs.branch }}"
+          # Continue your deployment or next steps
