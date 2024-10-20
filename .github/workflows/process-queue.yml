@@ -104,7 +104,7 @@ jobs:
         run: |
           branch="${{ env.branch }}"
           # Extract the last part of the RC branch name (e.g., "rc_test_deployment" from "rc/core_us_test_deployment")
-          rc_name=$(basename $branch)
+          rc_name=$(echo "$branch" | sed 's|.*/||')
           # Get current date in yyyy-mm-dd format
           date=$(date +'%Y-%m-%d')
           # Form release branch name: release/fast/yyyy-mm-dd_rc_name
