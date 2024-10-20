@@ -20,7 +20,7 @@ jobs:
           git config --global user.name "Ysoll"
           git config --global user.email "voda.cristian94@gmail.com"
 
-      # Step 3: Read queue and get the first RC branch
+      # Step 3: Read queue and get the first RC branch (FIFO)
       - name: Read queue and get the first RC branch
         id: get_queue
         run: |
@@ -32,35 +32,59 @@ jobs:
           echo "Picked branch: $queue_branch"
           echo "::set-output name=branch::$queue_branch"
 
-# Step to sync the RC branch with master
-- name: Sync RC branch with master
-  run: |
-    branch="${{ steps.get_queue.outputs.branch }}"
-    
-    # Fetch all remote branches
-    git fetch origin
+      # Step 4: Sync RC branch with master
+      - name: Sync RC branch with master
+        id: merge_master
+        run: |
+          branch="${{ steps.get_queue.outputs.branch }}"
+          
+          # Fetch all remote branches
+          git fetch origin
 
-    # Check if the branch exists
-    if git show-ref --verify --quiet refs/heads/$branch; then
-      echo "Branch $branch exists, checking it out."
-      git checkout $branch
-    else
-      echo "Branch $branch does not exist, creating it."
-      git checkout -b $branch
-      git push origin $branch
-    fi
-    
-    # Merge master into the branch
-    git fetch origin master
-    git merge origin/master --no-edit
-    if [ $? -ne 0 ]; then
-      echo "Merge conflict, aborting."
-      exit 1
-    fi
+          # Check if the branch exists
+          if git show-ref --verify --quiet refs/heads/$branch; then
+            echo "Branch $branch exists, checking it out."
+            git checkout $branch
+          else
+            echo "Branch $branch does not exist, creating it."
+            git checkout -b $branch
+            git push origin $branch
+          fi
+          
+          # Merge master into the branch
+          git fetch origin master
+          set +e  # Disable exit on error
+          git merge origin/master --no-edit
+          if [ $? -ne 0 ]; then
+            echo "Merge conflict detected, aborting."
+            echo "::set-output name=conflict::true"
+            exit 0
+          fi
+          set -e  # Re-enable exit on error
+          echo "::set-output name=conflict::false"
 
+      # Step 5: Handle merge conflict
+      - name: Send Teams Notification if Conflict Occurs
+        if: ${{ steps.merge_master.outputs.conflict == 'true' }}
+        run: |
+          branch="${{ steps.get_queue.outputs.branch }}"
+          curl -H 'Content-Type: application/json' \
+               -d '{"title": "Merge Conflict", "text": "A merge conflict occurred while merging branch '$branch' with master."}' \
+               ${{ secrets.TEAMS_WEBHOOK_URL }}
 
-      # Step 5: Create a release branch
+      # Step 6: Continue to the next branch if there was a conflict
+      - name: Remove branch from queue if conflict
+        if: ${{ steps.merge_master.outputs.conflict == 'true' }}
+        run: |
+          branch="${{ steps.get_queue.outputs.branch }}"
+          jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
+          git add rc_queue.json
+          git commit -m "Removed $branch due to merge conflict"
+          git push origin main
+
+      # Step 7: Create a release branch if no conflict
       - name: Create release branch
+        if: ${{ steps.merge_master.outputs.conflict == 'false' }}
         id: create_release_branch
         run: |
           branch="${{ steps.get_queue.outputs.branch }}"
@@ -70,8 +94,9 @@ jobs:
           git push origin $release_branch
           echo "::set-output name=release_branch::$release_branch"
 
-      # Step 6: Trigger Jenkins Deployment using the release branch
+      # Step 8: Trigger Jenkins Deployment using the release branch
       - name: Trigger Jenkins Job
+        if: ${{ steps.merge_master.outputs.conflict == 'false' }}
         uses: ./github/actions/jenkins-action  # Use your custom action here
         with:
           url: 'http://localhost:8080/job/JenkinsTest/buildWithParameters'
@@ -79,11 +104,18 @@ jobs:
           password: ${{ secrets.JENKINS_PASSWORD }}
           parameters: BRANCH_NAME=${{ steps.create_release_branch.outputs.release_branch }}
 
-      # Step 7: Remove processed branch from the queue
-      - name: Remove branch from queue
+      # Step 9: Remove the processed branch from the queue (FIFO rule)
+      - name: Remove processed branch from queue
+        if: ${{ steps.merge_master.outputs.conflict == 'false' }}
         run: |
           branch="${{ steps.get_queue.outputs.branch }}"
           jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
           git add rc_queue.json
-          git commit -m "Removed $branch from queue"
+          git commit -m "Removed $branch from queue after successful deployment"
           git push origin main
+
+      # Step 10: Log the completed process
+      - name: Log completion
+        run: |
+          branch="${{ steps.get_queue.outputs.branch }}"
+          echo "Processing completed for branch: $branch"
