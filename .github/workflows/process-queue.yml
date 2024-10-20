@@ -12,7 +12,7 @@ jobs:
 
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      JENKINS_URL: ${{ secrets.JENKINS_URL }}  # Store Jenkins URL as a secret
+      JENKINS_URL: ${{ secrets.JENKINS_URL }}  # Use ngrok or public URL
       JENKINS_USER: ${{ secrets.JENKINS_USER }}  # Store Jenkins user credentials
       JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}  # Store Jenkins API token
 
@@ -42,9 +42,9 @@ jobs:
           fi
           queue_branch=$(jq -r '.queue[0]' rc_queue.json)
           echo "Picked branch: $queue_branch"
-          echo "branch=$queue_branch" >> $GITHUB_ENV  # Replaces set-output
+          echo "branch=$queue_branch" >> $GITHUB_ENV
 
-      # Step 5: Sync remote RC branch with master and allow unrelated histories
+      # Step 5: Sync remote RC branch with master
       - name: Sync remote RC branch with master
         id: merge_master
         run: |
@@ -57,11 +57,7 @@ jobs:
           # Check if the branch exists in origin, and work with the remote branch directly
           if git ls-remote --heads origin $branch | grep $branch; then
             echo "Remote branch $branch exists, checking it out."
-
-            # Create a local tracking branch from the remote branch
             git checkout -b $branch origin/$branch
-
-            # Pull the latest changes from the remote branch
             git pull --rebase origin $branch || exit 1
           else
             echo "Remote branch $branch does not exist, creating it."
@@ -71,16 +67,16 @@ jobs:
           # Push the branch to remote
           git push origin $branch || exit 1
 
-          # Merge master into the branch with --allow-unrelated-histories flag and the "theirs" strategy
+          # Merge master into the branch with the "theirs" strategy
           git fetch origin master
           git merge -X theirs origin/master --no-edit --allow-unrelated-histories || {
               echo "Merge conflict detected in branch: $branch, aborting."
-              echo "conflict=true" >> $GITHUB_ENV  # Replaces set-output
+              echo "conflict=true" >> $GITHUB_ENV
               git merge --abort  # Abort the merge in case of conflict
               exit 1
           }
 
-          echo "conflict=false" >> $GITHUB_ENV  # Replaces set-output
+          echo "conflict=false" >> $GITHUB_ENV
         continue-on-error: true  # Allow the workflow to continue even if there's an error
 
       # Step 6: Handle merge conflict and skip to the next branch
@@ -88,7 +84,6 @@ jobs:
         if: ${{ env.conflict == 'true' }}
         run: |
           branch="${{ env.branch }}"
-          # Remove the first branch from the queue
           jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
           git add rc_queue.json
           git commit -m "Removed $branch due to merge conflict"
@@ -102,7 +97,7 @@ jobs:
           echo "Successfully processed branch: ${{ env.branch }}"
           # Continue your deployment or next steps
 
-      # Step 8: Create a release branch from the synced RC branch
+      # Step 8: Create release branch from synced RC branch
       - name: Create release branch
         id: create_release
         if: ${{ env.conflict == 'false' }}
@@ -112,18 +107,28 @@ jobs:
           release_branch="release/fast/$date-$branch"
           git checkout -b $release_branch
           git push origin $release_branch
-          echo "release_branch=$release_branch" >> $GITHUB_ENV  # Replaces set-output
+          echo "release_branch=$release_branch" >> $GITHUB_ENV
 
-      # Step 9: Trigger Jenkins deployment using the release branch
+      # Step 9: Trigger Jenkins deployment using release branch
       - name: Trigger Jenkins deployment
         if: ${{ env.release_branch }}
         run: |
           release_branch="${{ env.release_branch }}"
-          curl -X POST "${{ env.JENKINS_URL }}/job/deployment-job/buildWithParameters" \
-            --user "${{ env.JENKINS_USER }}:${{ env.JENKINS_TOKEN }}" \
-            --data "BRANCH_NAME=$release_branch"
+          jenkins_url="${{ env.JENKINS_URL }}"
+          if [ -z "$jenkins_url" ] || [ -z "$release_branch" ]; then
+            echo "Jenkins URL or release branch is missing."
+            exit 1
+          fi
 
-      # Step 10: Create a pull request from release branch to master
+          # Trigger Jenkins job
+          curl -X POST "$jenkins_url/job/JenkinsTest/buildWithParameters" \
+            --user "${{ env.JENKINS_USER }}:${{ env.JENKINS_TOKEN }}" \
+            --data-urlencode "BRANCH_NAME=$release_branch" || {
+              echo "Failed to trigger Jenkins job for $release_branch"
+              exit 1
+          }
+
+      # Step 10: Create pull request from release branch to master
       - name: Create a pull request
         if: ${{ env.release_branch }}
         id: create_pr
@@ -131,7 +136,7 @@ jobs:
           release_branch="${{ env.release_branch }}"
           pr_response=$(gh pr create --base master --head $release_branch --title "Merge $release_branch into master" --body "Automated PR for merging $release_branch into master.")
           pr_url=$(echo "$pr_response" | grep 'http' | awk '{print $1}')
-          echo "pr_url=$pr_url" >> $GITHUB_ENV  # Replaces set-output
+          echo "pr_url=$pr_url" >> $GITHUB_ENV
 
       # Step 11: Merge the pull request
       - name: Merge pull request
