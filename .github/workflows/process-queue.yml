@@ -1,3 +1,10 @@
+name: Process Deployment Queue
+
+on:
+  schedule:
+    - cron: "*/1 * * * *"  # Runs every minute (for testing)
+  workflow_dispatch:  # Allows manual triggering
+
 jobs:
   process-queue:
     runs-on: ubuntu-latest
@@ -36,10 +43,10 @@ jobs:
         run: |
           branch="${{ steps.get_queue.outputs.branch }}"
           
-      # Fetch all remote branches
+          # Fetch all remote branches
           git fetch origin
 
-       # Check if the branch exists
+          # Check if the branch exists
           if git show-ref --verify --quiet refs/heads/$branch; then
             echo "Branch $branch exists, checking it out."
             git checkout $branch
@@ -54,11 +61,23 @@ jobs:
           set +e  # Disable exit on error
           git merge origin/master --no-edit
           if [ $? -ne 0 ]; then
-            echo "Merge conflict detected, aborting."
+            echo "Merge conflict detected in branch: $branch, aborting."
             echo "::set-output name=conflict::true"
-           exit 0
+            exit 0
           fi
           set -e  # Re-enable exit on error
           echo "::set-output name=conflict::false"
 
-      # Continue with the rest of your workflow...
+      # Step 6: Log merge result and continue processing
+      - name: Log merge conflict or success
+        run: |
+          branch="${{ steps.get_queue.outputs.branch }}"
+          conflict="${{ steps.merge_master.outputs.conflict }}"
+          if [ "$conflict" = "true" ]; then
+            echo "There was a merge conflict for branch: $branch"
+            # Optional: You can send a notification here (e.g., via Microsoft Teams or Slack)
+          else
+            echo "Branch $branch successfully merged with master."
+          fi
+
+      # Optional Step: Continue with further deployment or release logic...
