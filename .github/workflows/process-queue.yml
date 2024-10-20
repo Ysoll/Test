@@ -41,31 +41,33 @@ jobs:
           echo "Picked branch: $queue_branch"
           echo "::set-output name=branch::$queue_branch"
 
-      # Step 5: Sync RC branch with master and pull latest changes before pushing
-      - name: Sync RC branch with master and pull latest changes
+      # Step 5: Sync remote RC branch with master and pull latest changes before pushing
+      - name: Sync remote RC branch with master
         id: merge_master
         run: |
           branch="${{ steps.get_queue.outputs.branch }}"
           set +e  # Disable automatic exit on error
 
-          # Fetch all remote branches
+          # Fetch all branches from origin
           git fetch origin
 
-          # Check if the branch exists locally, create it if not
-          if git show-ref --verify --quiet refs/heads/$branch; then
-            echo "Branch $branch exists, checking it out."
-            git checkout $branch
+          # Check if the branch exists in origin, and work with the remote branch directly
+          if git ls-remote --heads origin $branch | grep $branch; then
+            echo "Remote branch $branch exists, checking it out."
 
-            # Pull the latest changes from the remote branch before pushing
+            # Create a local tracking branch from the remote branch
+            git checkout -b $branch origin/$branch
+
+            # Pull the latest changes from the remote branch
             git pull --rebase origin $branch || exit 1
           else
-            echo "Branch $branch does not exist, creating it."
+            echo "Remote branch $branch does not exist, creating it."
             git checkout -b $branch
           fi
 
           # Push the branch to remote
           git push origin $branch || exit 1
-          
+
           # Merge master into the branch
           git fetch origin master
           git merge origin/master --no-edit
