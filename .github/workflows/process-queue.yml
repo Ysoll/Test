@@ -97,14 +97,18 @@ jobs:
           echo "Successfully processed branch: ${{ env.branch }}"
           # Continue your deployment or next steps
 
-      # Step 8: Create release branch from synced RC branch
+      # Step 8: Create release branch from synced RC branch with correct naming convention
       - name: Create release branch
         id: create_release
         if: ${{ env.conflict == 'false' }}
         run: |
           branch="${{ env.branch }}"
-          date=$(date +'%Y%m%d')
-          release_branch="release/fast/$date-$branch"
+          # Extract the last part of the RC branch name (e.g., "rc_test_deployment" from "rc/core_us_test_deployment")
+          rc_name=$(basename $branch)
+          # Get current date in yyyy-mm-dd format
+          date=$(date +'%Y-%m-%d')
+          # Form release branch name: release/fast/yyyy-mm-dd_rc_name
+          release_branch="release/fast/$date_$rc_name"
           git checkout -b $release_branch
           git push origin $release_branch
           echo "release_branch=$release_branch" >> $GITHUB_ENV
