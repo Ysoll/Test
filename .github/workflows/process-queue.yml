@@ -71,11 +71,12 @@ jobs:
           # Push the branch to remote
           git push origin $branch || exit 1
 
-          # Merge master into the branch with --allow-unrelated-histories flag
+          # Merge master into the branch with --allow-unrelated-histories flag and the "theirs" strategy
           git fetch origin master
-          git merge origin/master --no-edit --allow-unrelated-histories || {
+          git merge -X theirs origin/master --no-edit --allow-unrelated-histories || {
               echo "Merge conflict detected in branch: $branch, aborting."
               echo "conflict=true" >> $GITHUB_ENV  # Replaces set-output
+              git merge --abort  # Abort the merge in case of conflict
               exit 1
           }
 
