@@ -50,11 +50,16 @@ jobs:
           if git show-ref --verify --quiet refs/heads/$branch; then
             echo "Branch $branch exists, checking it out."
             git checkout $branch
+
+            # Pull latest changes from the remote branch before pushing
+            git pull --rebase origin $branch
           else
             echo "Branch $branch does not exist, creating it."
             git checkout -b $branch
-            git push origin $branch
           fi
+
+          # Push the branch to remote
+          git push origin $branch
           
           # Merge master into the branch
           git fetch origin master
@@ -67,17 +72,3 @@ jobs:
           fi
           set -e  # Re-enable exit on error
           echo "::set-output name=conflict::false"
-
-      # Step 6: Log merge result and continue processing
-      - name: Log merge conflict or success
-        run: |
-          branch="${{ steps.get_queue.outputs.branch }}"
-          conflict="${{ steps.merge_master.outputs.conflict }}"
-          if [ "$conflict" = "true" ]; then
-            echo "There was a merge conflict for branch: $branch"
-            # Optional: You can send a notification here (e.g., via Microsoft Teams or Slack)
-          else
-            echo "Branch $branch successfully merged with master."
-          fi
-
-      # Optional Step: Continue with further deployment or release logic...
