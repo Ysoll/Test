@@ -103,12 +103,12 @@ jobs:
         if: ${{ env.conflict == 'false' }}
         run: |
           branch="${{ env.branch }}"
-          # Extract the last part of the RC branch name (e.g., "rc_test_deployment" from "rc/core_us_test_deployment")
-          rc_name=$(echo "$branch" | sed 's|.*/||')
+          # Extract the RC branch description (everything after the last "/")
+          rc_description=$(echo "$branch" | sed 's|.*/||')
           # Get current date in yyyy-mm-dd format
           date=$(date +'%Y-%m-%d')
-          # Form release branch name: release/fast/yyyy-mm-dd_rc_name
-          release_branch="release/fast/$date_$rc_name"
+          # Form release branch name: release/fast/yyyy-mm-dd_rc_description
+          release_branch="release/fast/$date_$rc_description"
           git checkout -b $release_branch
           git push origin $release_branch
           echo "release_branch=$release_branch" >> $GITHUB_ENV
