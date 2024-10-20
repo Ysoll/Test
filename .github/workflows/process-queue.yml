@@ -42,13 +42,13 @@ jobs:
           fi
           queue_branch=$(jq -r '.queue[0]' rc_queue.json)
           echo "Picked branch: $queue_branch"
-          echo "::set-output name=branch::$queue_branch"
+          echo "branch=$queue_branch" >> $GITHUB_ENV  # Replaces set-output
 
       # Step 5: Sync remote RC branch with master and allow unrelated histories
       - name: Sync remote RC branch with master
         id: merge_master
         run: |
-          branch="${{ steps.get_queue.outputs.branch }}"
+          branch="${{ env.branch }}"
           set +e  # Disable automatic exit on error
 
           # Fetch all branches from origin
@@ -73,70 +73,78 @@ jobs:
 
           # Merge master into the branch with --allow-unrelated-histories flag
           git fetch origin master
-          git merge origin/master --no-edit --allow-unrelated-histories
+          git merge origin/master --no-edit --allow-unrelated-histories || {
+              echo "Merge conflict detected in branch: $branch, aborting."
+              echo "conflict=true" >> $GITHUB_ENV  # Replaces set-output
+              exit 1
+          }
 
-          if [ $? -ne 0 ]; then
-            echo "Merge conflict detected in branch: $branch, aborting."
-            echo "::set-output name=conflict::true"
-            exit 1  # Exit with error code to indicate a failure
-          else
-            echo "::set-output name=conflict::false"
-          fi
+          echo "conflict=false" >> $GITHUB_ENV  # Replaces set-output
         continue-on-error: true  # Allow the workflow to continue even if there's an error
 
-      # Step 6: Create a release branch from the synced RC branch
+      # Step 6: Handle merge conflict and skip to the next branch
+      - name: Skip to the next branch if conflict
+        if: ${{ env.conflict == 'true' }}
+        run: |
+          branch="${{ env.branch }}"
+          # Remove the first branch from the queue
+          jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
+          git add rc_queue.json
+          git commit -m "Removed $branch due to merge conflict"
+          git push origin main
+          echo "Skipped branch: $branch due to conflict, picking the next branch."
+
+      # Step 7: Process the next branch if no conflict
+      - name: Continue with next branch if no conflict
+        if: ${{ env.conflict == 'false' }}
+        run: |
+          echo "Successfully processed branch: ${{ env.branch }}"
+          # Continue your deployment or next steps
+
+      # Step 8: Create a release branch from the synced RC branch
       - name: Create release branch
         id: create_release
-        if: ${{ steps.merge_master.outputs.conflict == 'false' }}
+        if: ${{ env.conflict == 'false' }}
         run: |
-          branch="${{ steps.get_queue.outputs.branch }}"
+          branch="${{ env.branch }}"
           date=$(date +'%Y%m%d')
           release_branch="release/fast/$date-$branch"
           git checkout -b $release_branch
           git push origin $release_branch
-          echo "::set-output name=release_branch::$release_branch"
+          echo "release_branch=$release_branch" >> $GITHUB_ENV  # Replaces set-output
 
-      # Step 7: Trigger Jenkins deployment using the release branch
+      # Step 9: Trigger Jenkins deployment using the release branch
       - name: Trigger Jenkins deployment
-        if: ${{ steps.create_release.outputs.release_branch }}
+        if: ${{ env.release_branch }}
         run: |
-          release_branch="${{ steps.create_release.outputs.release_branch }}"
+          release_branch="${{ env.release_branch }}"
           curl -X POST "${{ env.JENKINS_URL }}/job/deployment-job/buildWithParameters" \
             --user "${{ env.JENKINS_USER }}:${{ env.JENKINS_TOKEN }}" \
             --data "BRANCH_NAME=$release_branch"
 
-      # Step 8: Create a pull request from release branch to master
+      # Step 10: Create a pull request from release branch to master
       - name: Create a pull request
-        if: ${{ steps.create_release.outputs.release_branch }}
+        if: ${{ env.release_branch }}
         id: create_pr
         run: |
-          release_branch="${{ steps.create_release.outputs.release_branch }}"
+          release_branch="${{ env.release_branch }}"
           pr_response=$(gh pr create --base master --head $release_branch --title "Merge $release_branch into master" --body "Automated PR for merging $release_branch into master.")
           pr_url=$(echo "$pr_response" | grep 'http' | awk '{print $1}')
-          echo "::set-output name=pr_url::$pr_url"
+          echo "pr_url=$pr_url" >> $GITHUB_ENV  # Replaces set-output
 
-      # Step 9: Merge the pull request
+      # Step 11: Merge the pull request
       - name: Merge pull request
-        if: ${{ steps.create_pr.outputs.pr_url }}
+        if: ${{ env.pr_url }}
         run: |
-          pr_url="${{ steps.create_pr.outputs.pr_url }}"
+          pr_url="${{ env.pr_url }}"
           gh pr merge --auto --delete-branch --squash "$pr_url"
 
-      # Step 10: Remove the RC branch from the queue and mark as deployed
+      # Step 12: Remove the RC branch from the queue and mark as deployed
       - name: Remove branch from queue and mark as deployed
         run: |
-          branch="${{ steps.get_queue.outputs.branch }}"
+          branch="${{ env.branch }}"
           jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
           git add rc_queue.json
           git commit -m "Removed $branch from queue and marked as deployed"
           git push origin main
           echo "Successfully deployed and removed branch: $branch"
-
-      # Step 11: Commit and push queue changes after processing
-      - name: Commit and push changes to the queue
-        run: |
-          # Remove the first branch from the queue after successfully processing it
-          jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
-          git add rc_queue.json
-          git commit -m "Removed successfully processed branch: ${{ steps.get_queue.outputs.branch }}"
-          git push origin main
