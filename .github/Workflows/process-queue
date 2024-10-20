@@ -61,18 +61,18 @@ jobs:
       - name: Trigger Jenkins Job
         uses: appleboy/jenkins-action@v1.1.0
         with:
-          url: 'https://your-jenkins-url/job/deployment-job/buildWithParameters'
-          username: ${{ secrets.JENKINS_USER }}   # Jenkins user from secrets
-          token: ${{ secrets.JENKINS_TOKEN }}     # Jenkins API token from secrets
+          url: 'http://localhost:8080/job/JenkinsTest/buildWithParameters'
+          username: 'admin'
+          token: '317332011d95481dbef44452c153ec6b'
           parameters: BRANCH_NAME=${{ steps.create_release_branch.outputs.release_branch }}
 
       # Step 6: Wait for Jenkins Deployment to Complete
       - name: Wait for Jenkins Job to Complete
         uses: appleboy/jenkins-action@v1.1.0
         with:
-          url: 'https://your-jenkins-url/job/deployment-job/lastBuild/api/json'
-          username: ${{ secrets.JENKINS_USER }}
-          token: ${{ secrets.JENKINS_TOKEN }}
+          url: 'http://localhost:8080/job/JenkinsTest/buildWithParameters'
+          username: 'admin'
+          token: '317332011d95481dbef44452c153ec6b'
 
       # Step 7: Merge Release Branch into Master after successful deployment
       - name: Merge Release Branch into Master
