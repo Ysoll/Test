@@ -10,6 +10,10 @@ jobs:
   process-queue:
     runs-on: ubuntu-latest
 
+    env:
+      TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}  # Store the Microsoft Teams webhook URL in GitHub Secrets
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     steps:
       # Step 1: Checkout repository
       - name: Checkout repository
@@ -28,6 +32,7 @@ jobs:
 
       # Step 4: Post the queue status to Microsoft Teams in the morning
       - name: Post queue status to Microsoft Teams
+        if: "!cancelled()"  # Ensure the workflow isn't canceled before proceeding
         run: |
           queue_status=$(jq '.queue' rc_queue.json)
           curl -H 'Content-Type: application/json' \
@@ -46,16 +51,17 @@ jobs:
           echo "Picked branch: $queue_branch"
           echo "::set-output name=branch::$queue_branch"
 
-      # Step 6: Sync RC branch with master
+      # Step 6: Sync RC branch with master and handle errors
       - name: Sync RC branch with master
         id: merge_master
         run: |
           branch="${{ steps.get_queue.outputs.branch }}"
-          
+          set +e  # Disable automatic exit on error
+
           # Fetch all remote branches
           git fetch origin
 
-          # Check if the branch exists
+          # Check if the branch exists, create it if not
           if git show-ref --verify --quiet refs/heads/$branch; then
             echo "Branch $branch exists, checking it out."
             git checkout $branch
@@ -72,22 +78,46 @@ jobs:
           
           # Merge master into the branch
           git fetch origin master
-          set +e  # Disable exit on error
           git merge origin/master --no-edit
+
           if [ $? -ne 0 ]; then
             echo "Merge conflict detected in branch: $branch, aborting."
             echo "::set-output name=conflict::true"
-            exit 0
+            exit 1  # Exit with error code to indicate a failure
+          else
+            echo "::set-output name=conflict::false"
           fi
-          set -e  # Re-enable exit on error
-          echo "::set-output name=conflict::false"
+        continue-on-error: true  # Allow the workflow to continue even if there's an error
 
-      # Step 7: Post next deployment to Microsoft Teams after each deployment
+      # Step 7: Post next deployment to Microsoft Teams if no conflict
       - name: Post next deployment to Microsoft Teams
+        if: ${{ steps.merge_master.outputs.conflict == 'false' }}  # Only post if there's no conflict
         run: |
-          next_branch=$(jq -r '.queue[0]' rc_queue.json)
+          next_branch=$(jq -r '.queue[1]' rc_queue.json)  # Get the next branch
           curl -H 'Content-Type: application/json' \
                -d '{"text": "The next RC branch to be deployed is: '"$next_branch"'"}' \
                ${{ secrets.TEAMS_WEBHOOK_URL }}
 
-      # Continue with further deployment or release logic...
+      # Step 8: Post failure to Microsoft Teams if merge conflict
+      - name: Post merge conflict to Microsoft Teams
+        if: ${{ steps.merge_master.outputs.conflict == 'true' }}  # Only post if there's a conflict
+        run: |
+          branch="${{ steps.get_queue.outputs.branch }}"
+          curl -H 'Content-Type: application/json' \
+               -d '{"text": "Merge conflict detected in branch: '"$branch"' while syncing with master."}' \
+               ${{ secrets.TEAMS_WEBHOOK_URL }}
+
+    # Post actions to notify after success or failure
+    post:
+      failure:
+        if: "!cancelled()"  # Skip if the job was manually cancelled
+        run: |
+          curl -H 'Content-Type: application/json' \
+               -d '{"text": "The deployment process failed. Please check the logs."}' \
+               ${{ secrets.TEAMS_WEBHOOK_URL }}
+      success:
+        if: "!cancelled()"  # Skip if the job was manually cancelled
+        run: |
+          curl -H 'Content-Type: application/json' \
+               -d '{"text": "The deployment process completed successfully."}' \
+               ${{ secrets.TEAMS_WEBHOOK_URL }}
