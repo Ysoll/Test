@@ -12,7 +12,7 @@ jobs:
 
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      JENKINS_URL: "http://localhost:8080/job/JenkinsTest/"  # Local Jenkins instance
+      JENKINS_URL: "https://4f8a-188-25-114-173.ngrok-free.app/job/JenkinsTest/"  # ngrok URL for Jenkins
       JENKINS_USER: ${{ secrets.JENKINS_USER }}  # Store Jenkins user credentials
       JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}  # Store Jenkins API token
 
