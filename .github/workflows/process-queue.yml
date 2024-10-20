@@ -163,13 +163,13 @@ jobs:
           pr_url="${{ env.pr_url }}"
           gh pr merge --auto --delete-branch --squash "$pr_url"
 
-      # Step 12: Remove the RC branch from the queue and mark as deployed
-      - name: Remove branch from queue and mark as deployed
+      # Step 12: Remove the RC branch from the queue (rc_queue.json) after deployment
+      - name: Remove branch from rc_queue.json after deployment
         run: |
           branch="${{ env.branch }}"
           # Remove the first branch (FIFO) from the queue (rc_queue.json)
           jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
           git add rc_queue.json
-          git commit -m "Removed $branch from rc_queue.json after deployment"
+          git commit -m "Removed $branch from rc_queue.json after successful deployment"
           git push origin main
-          echo "Successfully deployed and removed branch: $branch"
+          echo "Successfully deployed and removed branch from rc_queue.json"
