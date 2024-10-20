@@ -12,7 +12,7 @@ jobs:
 
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      JENKINS_URL: ${{ secrets.JENKINS_URL }}  # Use ngrok or public URL
+      JENKINS_URL: "http://localhost:8080/job/JenkinsTest/"  # Local Jenkins instance
       JENKINS_USER: ${{ secrets.JENKINS_USER }}  # Store Jenkins user credentials
       JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}  # Store Jenkins API token
 
@@ -109,6 +109,7 @@ jobs:
           date=$(date +'%Y-%m-%d')
           # Form release branch name: release/fast/yyyy-mm-dd_rc_description
           release_branch="release/fast/$date_$rc_description"
+          echo "Creating release branch: $release_branch"  # Debugging output
           git checkout -b $release_branch
           git push origin $release_branch
           echo "release_branch=$release_branch" >> $GITHUB_ENV
@@ -119,13 +120,14 @@ jobs:
         run: |
           release_branch="${{ env.release_branch }}"
           jenkins_url="${{ env.JENKINS_URL }}"
+          echo "Triggering Jenkins with branch: $release_branch"  # Debugging output
           if [ -z "$jenkins_url" ] || [ -z "$release_branch" ]; then
             echo "Jenkins URL or release branch is missing."
             exit 1
           fi
 
           # Trigger Jenkins job
-          curl -X POST "$jenkins_url/job/JenkinsTest/buildWithParameters" \
+          curl -X POST "$jenkins_url/buildWithParameters" \
             --user "${{ env.JENKINS_USER }}:${{ env.JENKINS_TOKEN }}" \
             --data-urlencode "BRANCH_NAME=$release_branch" || {
               echo "Failed to trigger Jenkins job for $release_branch"
