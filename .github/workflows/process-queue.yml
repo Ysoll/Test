@@ -98,7 +98,7 @@ jobs:
                -d '{"text": "The next RC branch to be deployed is: '"$next_branch"'"}' \
                ${{ secrets.TEAMS_WEBHOOK_URL }}
 
-      # Step 8: Post failure to Microsoft Teams if merge conflict
+      # Step 8: Post merge conflict to Microsoft Teams if merge conflict
       - name: Post merge conflict to Microsoft Teams
         if: ${{ steps.merge_master.outputs.conflict == 'true' }}  # Only post if there's a conflict
         run: |
@@ -107,16 +107,17 @@ jobs:
                -d '{"text": "Merge conflict detected in branch: '"$branch"' while syncing with master."}' \
                ${{ secrets.TEAMS_WEBHOOK_URL }}
 
-    # Post actions to notify after success or failure
-    post:
-      failure:
-        if: "!cancelled()"  # Skip if the job was manually cancelled
+      # Step 9: Post failure to Microsoft Teams if the job fails
+      - name: Post failure to Microsoft Teams
+        if: failure()  # Only run this step if the job fails
         run: |
           curl -H 'Content-Type: application/json' \
                -d '{"text": "The deployment process failed. Please check the logs."}' \
                ${{ secrets.TEAMS_WEBHOOK_URL }}
-      success:
-        if: "!cancelled()"  # Skip if the job was manually cancelled
+
+      # Step 10: Post success to Microsoft Teams if the job succeeds
+      - name: Post success to Microsoft Teams
+        if: success()  # Only run this step if the job succeeds
         run: |
           curl -H 'Content-Type: application/json' \
                -d '{"text": "The deployment process completed successfully."}' \
