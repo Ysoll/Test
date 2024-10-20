@@ -109,9 +109,21 @@ jobs:
           date=$(date +'%Y-%m-%d')
           # Form release branch name: release/fast/yyyy-mm-dd_rc_description
           release_branch="release/fast/$date_$rc_description"
-          echo "Creating release branch: $release_branch"  # Debugging output
-          git checkout -b $release_branch
-          git push origin $release_branch
+          echo "Creating release branch: $release_branch"
+
+          # Check if release branch already exists on remote
+          if git ls-remote --heads origin $release_branch | grep $release_branch; then
+            echo "Remote release branch $release_branch exists, pulling latest changes."
+            git checkout $release_branch
+            git pull --rebase origin $release_branch || exit 1
+          else
+            echo "Release branch $release_branch does not exist, creating it."
+            git checkout -b $release_branch
+          fi
+
+          # Push the release branch
+          git push origin $release_branch || exit 1
+
           echo "release_branch=$release_branch" >> $GITHUB_ENV
 
       # Step 9: Trigger Jenkins deployment using release branch
