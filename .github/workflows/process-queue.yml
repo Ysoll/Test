@@ -31,13 +31,14 @@ jobs:
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
 
       # Step 4: Post the queue status to Microsoft Teams in the morning
-      - name: Post queue status to Microsoft Teams
-        if: "!cancelled()"  # Ensure the workflow isn't canceled before proceeding
-        run: |
-          queue_status=$(jq '.queue' rc_queue.json)
-          curl -H 'Content-Type: application/json' \
-               -d '{"text": "Good morning! Here is the current deployment queue:\n'"$queue_status"'"}' \
-               ${{ secrets.TEAMS_WEBHOOK_URL }}
+      # This step is commented out to skip posting the queue status to Microsoft Teams.
+      # - name: Post queue status to Microsoft Teams
+      #   if: "!cancelled()"  # Ensure the workflow isn't canceled before proceeding
+      #   run: |
+      #     queue_status=$(jq '.queue' rc_queue.json)
+      #     curl -H 'Content-Type: application/json' \
+      #          -d '{"text": "Good morning! Here is the current deployment queue:\n'"$queue_status"'"}' \
+      #          ${{ secrets.TEAMS_WEBHOOK_URL }}
 
       # Step 5: Read queue and get the first RC branch (FIFO)
       - name: Read queue and get the first RC branch
@@ -90,35 +91,39 @@ jobs:
         continue-on-error: true  # Allow the workflow to continue even if there's an error
 
       # Step 7: Post next deployment to Microsoft Teams if no conflict
-      - name: Post next deployment to Microsoft Teams
-        if: ${{ steps.merge_master.outputs.conflict == 'false' }}  # Only post if there's no conflict
-        run: |
-          next_branch=$(jq -r '.queue[1]' rc_queue.json)  # Get the next branch
-          curl -H 'Content-Type: application/json' \
-               -d '{"text": "The next RC branch to be deployed is: '"$next_branch"'"}' \
-               ${{ secrets.TEAMS_WEBHOOK_URL }}
+      # This step is commented out to skip posting the next RC branch to Microsoft Teams.
+      # - name: Post next deployment to Microsoft Teams
+      #   if: ${{ steps.merge_master.outputs.conflict == 'false' }}  # Only post if there's no conflict
+      #   run: |
+      #     next_branch=$(jq -r '.queue[1]' rc_queue.json)  # Get the next branch
+      #     curl -H 'Content-Type: application/json' \
+      #          -d '{"text": "The next RC branch to be deployed is: '"$next_branch"'"}' \
+      #          ${{ secrets.TEAMS_WEBHOOK_URL }}
 
       # Step 8: Post merge conflict to Microsoft Teams if merge conflict
-      - name: Post merge conflict to Microsoft Teams
-        if: ${{ steps.merge_master.outputs.conflict == 'true' }}  # Only post if there's a conflict
-        run: |
-          branch="${{ steps.get_queue.outputs.branch }}"
-          curl -H 'Content-Type: application/json' \
-               -d '{"text": "Merge conflict detected in branch: '"$branch"' while syncing with master."}' \
-               ${{ secrets.TEAMS_WEBHOOK_URL }}
+      # This step is commented out to skip posting merge conflict notifications to Microsoft Teams.
+      # - name: Post merge conflict to Microsoft Teams
+      #   if: ${{ steps.merge_master.outputs.conflict == 'true' }}  # Only post if there's a conflict
+      #   run: |
+      #     branch="${{ steps.get_queue.outputs.branch }}"
+      #     curl -H 'Content-Type: application/json' \
+      #          -d '{"text": "Merge conflict detected in branch: '"$branch"' while syncing with master."}' \
+      #          ${{ secrets.TEAMS_WEBHOOK_URL }}
 
       # Step 9: Post failure to Microsoft Teams if the job fails
-      - name: Post failure to Microsoft Teams
-        if: failure()  # Only run this step if the job fails
-        run: |
-          curl -H 'Content-Type: application/json' \
-               -d '{"text": "The deployment process failed. Please check the logs."}' \
-               ${{ secrets.TEAMS_WEBHOOK_URL }}
+      # This step is commented out to skip posting failure notifications to Microsoft Teams.
+      # - name: Post failure to Microsoft Teams
+      #   if: failure()  # Only run this step if the job fails
+      #   run: |
+      #     curl -H 'Content-Type: application/json' \
+      #          -d '{"text": "The deployment process failed. Please check the logs."}' \
+      #          ${{ secrets.TEAMS_WEBHOOK_URL }}
 
       # Step 10: Post success to Microsoft Teams if the job succeeds
-      - name: Post success to Microsoft Teams
-        if: success()  # Only run this step if the job succeeds
-        run: |
-          curl -H 'Content-Type: application/json' \
-               -d '{"text": "The deployment process completed successfully."}' \
-               ${{ secrets.TEAMS_WEBHOOK_URL }}
+      # This step is commented out to skip posting success notifications to Microsoft Teams.
+      # - name: Post success to Microsoft Teams
+      #   if: success()  # Only run this step if the job succeeds
+      #   run: |
+      #     curl -H 'Content-Type: application/json' \
+      #          -d '{"text": "The deployment process completed successfully."}' \
+      #          ${{ secrets.TEAMS_WEBHOOK_URL }}
