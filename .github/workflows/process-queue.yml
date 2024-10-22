@@ -152,7 +152,7 @@ jobs:
         id: create_pr
         run: |
           release_branch="${{ env.release_branch }}"
-          pr_response=$(gh pr create --base master --head $release_branch --title "Merge $release_branch into master" --body "Automated PR for merging $release_branch into master.")
+          pr_response=$(gh pr create --base master --head "$release_branch" --title "Merge $release_branch into master" --body "Automated PR for merging $release_branch into master.")
           pr_url=$(echo "$pr_response" | grep 'http' | awk '{print $1}')
           echo "pr_url=$pr_url" >> $GITHUB_ENV
 
@@ -169,19 +169,19 @@ jobs:
           branch="${{ env.branch }}"
           rc_description=$(echo "$branch" | sed 's|.*/||')
           remove_branch="remove/$rc_description"
-          git checkout -b $remove_branch
+          git checkout -b "$remove_branch"
 
           # Update the queue by removing the current branch
           jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
           git add rc_queue.json
           git commit -m "Removed $branch from rc_queue.json after successful deployment"
-          git push origin $remove_branch
+          git push origin "$remove_branch"
 
       # Step 13: Create a pull request for the remove branch
       - name: Create a pull request for remove branch
         run: |
-          remove_branch="${{ env.remove_branch }}"
-          pr_response=$(gh pr create --base master --head $remove_branch --title "Remove $branch from rc_queue" --body "Automated PR for removing $branch from the queue.")
+          remove_branch="remove/$rc_description"
+          pr_response=$(gh pr create --base master --head "$remove_branch" --title "Remove $branch from rc_queue" --body "Automated PR for removing $branch from the queue.")
           pr_url=$(echo "$pr_response" | grep 'http' | awk '{print $1}')
           echo "pr_url=$pr_url" >> $GITHUB_ENV
 
