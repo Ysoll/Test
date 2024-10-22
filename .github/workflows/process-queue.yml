@@ -190,4 +190,12 @@ jobs:
         if: ${{ env.pr_url }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run:
+        run: |
+          pr_number=$(gh pr view ${{ github.event.pull_request.number }} --json number --jq .number)
+          pr_mergeable=$(gh pr view $pr_number --json mergeable --jq .mergeable)
+
+          if [[ "$pr_mergeable" == "true" ]]; then
+            echo "PR is mergeable. Proceeding to merge."
+            gh pr merge $pr_number --squash --delete-branch --repo ${{ github.repository }}
+          else
+            echo "PR is not mergeable. Skipping merge."
