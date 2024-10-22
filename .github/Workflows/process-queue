@@ -1,0 +1,102 @@
+name: Process Deployment Queue
+
+on:
+  schedule:
+    - cron: "*/1 * * * *"  # Runs every 10 minutes
+  workflow_dispatch:         # Allows manual triggering
+
+jobs:
+  process-queue:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      # Step 2: Pick the first RC branch from the queue
+      - name: Pick RC Branch from Queue (FIFO)
+        id: pick_branch
+        run: |
+          if [ ! -s rc_queue.json ]; then
+            echo "No branches in the queue"
+            exit 0
+          fi
+          rc_branch=$(head -n 1 rc_queue.json)
+          echo "Picked RC branch: $rc_branch"
+          sed -i '1d' rc_queue.json
+          git add rc_queue.json
+          git commit -m "Processing $rc_branch and removing it from the queue"
+          git push origin HEAD
+          echo "::set-output name=rc_branch::$rc_branch"
+
+      # Step 3: Sync RC Branch with Master
+      - name: Sync RC Branch with Master
+        run: |
+          rc_branch="${{ steps.pick_branch.outputs.rc_branch }}"
+          git checkout $rc_branch
+          git fetch origin
+          git merge origin/master --no-edit
+          if [ $? -ne 0 ]; then
+            echo "Merge conflict, aborting."
+            exit 1
+          fi
+
+      # Step 4: Create a Release Branch (release/fast/YYYYMMDD-<rc-branch-name>)
+      - name: Create Release Branch
+        id: create_release_branch
+        run: |
+          rc_branch="${{ steps.pick_branch.outputs.rc_branch }}"
+          date=$(date +'%Y%m%d')  # Get current date
+          release_branch="release/fast/$date-$rc_branch"
+          
+          echo "Creating release branch: $release_branch"
+          
+          # Create and push the new release branch
+          git checkout -b $release_branch
+          git push origin $release_branch
+          echo "::set-output name=release_branch::$release_branch"
+
+      # Step 5: Trigger Jenkins Deployment using Release Branch
+      - name: Trigger Jenkins Job
+        uses: appleboy/jenkins-action@v1.1.0
+        with:
+          url: 'http://localhost:8080/job/JenkinsTest/buildWithParameters'
+          username: 'admin'
+          token: '317332011d95481dbef44452c153ec6b'
+          parameters: BRANCH_NAME=${{ steps.create_release_branch.outputs.release_branch }}
+
+      # Step 6: Wait for Jenkins Deployment to Complete
+      - name: Wait for Jenkins Job to Complete
+        uses: appleboy/jenkins-action@v1.1.0
+        with:
+          url: 'http://localhost:8080/job/JenkinsTest/buildWithParameters'
+          username: 'admin'
+          token: '317332011d95481dbef44452c153ec6b'
+
+      # Step 7: Merge Release Branch into Master after successful deployment
+      - name: Merge Release Branch into Master
+        run: |
+          release_branch="${{ steps.create_release_branch.outputs.release_branch }}"
+          git checkout master
+          git pull origin master
+          git merge $release_branch --no-edit
+          git push origin master
+
+      # Step 8: Mark RC Branch as Released and Cleanup
+      - name: Mark RC Branch as Released
+        run: |
+          rc_branch="${{ steps.pick_branch.outputs.rc_branch }}"
+          echo "$rc_branch is now released."
+          
+          # Optionally create a log or mark it as released (e.g., update a file)
+          echo "$rc_branch: released on $(date)" >> release-log.txt
+          git add release-log.txt
+          git commit -m "Mark $rc_branch as released"
+          git push origin HEAD
+
+      # Step 9: Cleanup: Optionally delete the release branch from remote
+      - name: Delete Release Branch from Remote
+        run: |
+          release_branch="${{ steps.create_release_branch.outputs.release_branch }}"
+          git push origin --delete $release_branch
