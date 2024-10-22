@@ -198,11 +198,11 @@ jobs:
         run: |
           remove_branch="remove/$rc_description"
 
-          # Create the pull request if the branch exists and has changes
-          if git show-ref --verify --quiet refs/heads/$remove_branch; then
+          # Ensure the branch has at least one commit before creating the PR
+          if git log "$remove_branch" ^master --oneline | grep -q .; then
             pr_response=$(gh pr create --base master --head "$remove_branch" --title "Remove $branch from rc_queue" --body "Automated PR for removing $branch from the queue.")
             pr_url=$(echo "$pr_response" | grep 'http' | awk '{print $1}')
             echo "pr_url=$pr_url" >> $GITHUB_ENV
           else
-            echo "Error: Branch $remove_branch does not exist."
+            echo "Error: No commits to push. Skipping PR creation."
           fi
