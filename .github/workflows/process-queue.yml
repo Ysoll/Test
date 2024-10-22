@@ -169,40 +169,33 @@ jobs:
           branch="${{ env.branch }}"
           rc_description=$(echo "$branch" | sed 's|.*/||')
           remove_branch="remove/$rc_description"
+          git checkout -b "$remove_branch"
 
-          # Check if the remove branch exists; if not, create it
-          git fetch origin
-          if git show-ref --verify --quiet refs/heads/$remove_branch; then
-            echo "Branch $remove_branch already exists, pulling latest changes."
-            git checkout "$remove_branch"
-            git pull origin "$remove_branch"  # Pull the latest changes from the remote branch
-
-            # Make sure there are changes (like updating the queue)
-            jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
-            git add rc_queue.json
-            git commit -m "Removed $branch from rc_queue.json after successful deployment"
-            git push origin "$remove_branch"
-          else
-            echo "Branch $remove_branch doesn't exist. Creating the branch."
-            git checkout -b "$remove_branch"
-
-            # Make sure there are changes (like updating the queue)
-            jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
-            git add rc_queue.json
-            git commit -m "Removed $branch from rc_queue.json after successful deployment"
-            git push origin "$remove_branch"
-          fi
+          # Update the queue by removing the current branch
+          jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
+          git add rc_queue.json
+          git commit -m "Removed $branch from rc_queue.json after successful deployment"
+          git push origin "$remove_branch"
 
       # Step 13: Create a pull request for the remove branch
       - name: Create a pull request for remove branch
         run: |
           remove_branch="remove/$rc_description"
+          pr_response=$(gh pr create --base master --head "$remove_branch" --title "Remove $branch from rc_queue" --body "Automated PR for removing $branch from the queue.")
+          pr_url=$(echo "$pr_response" | grep 'http' | awk '{print $1}')
+          echo "pr_url=$pr_url" >> $GITHUB_ENV
 
-          # Ensure the branch has at least one commit before creating the PR
-          if git log "$remove_branch" ^master --oneline | grep -q .; then
-            pr_response=$(gh pr create --base master --head "$remove_branch" --title "Remove $branch from rc_queue" --body "Automated PR for removing $branch from the queue.")
-            pr_url=$(echo "$pr_response" | grep 'http' | awk '{print $1}')
-            echo "pr_url=$pr_url" >> $GITHUB_ENV
+      # Step 14: Automatically merge the pull request if possible
+      - name: Auto-merge the PR
+        if: ${{ env.pr_url }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pr_number=$(gh pr view ${{ github.event.pull_request.number }} --json number --jq .number)
+          pr_mergeable=$(gh pr view $pr_number --json mergeable --jq .mergeable)
+
+          if [[ "$pr_mergeable" == "true" ]]; then
+            echo "PR is mergeable. Proceeding to merge."
+            gh pr merge $pr_number --squash --delete-branch --repo ${{ github.repository }}
           else
-            echo "Error: No commits to push. Skipping PR creation."
-          fi
+            echo "PR is not mergeable. Skipping merge."
