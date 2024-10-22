@@ -1,5 +1,9 @@
 {
   "queue": [
-    "rc/core_us_test_deployment"
+    "rc/core_us_test_deployment",
+    "rc/core_eu_test_deployment",
+    "rc/api_v1_integration",
+    "rc/webapp_v2_feature",
+    "rc/mobile_feature_fix"
   ]
 }
