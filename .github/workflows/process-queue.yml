@@ -146,7 +146,7 @@ jobs:
               exit 1
           }
 
-      # Step 10: Create pull request from release branch to master
+      # Step 10: Create a pull request from the release branch to master
       - name: Create a pull request
         if: ${{ env.release_branch }}
         id: create_pr
@@ -163,13 +163,30 @@ jobs:
           pr_url="${{ env.pr_url }}"
           gh pr merge --auto --delete-branch --squash "$pr_url"
 
-      # Step 12: Remove the RC branch from the queue (rc_queue.json) after deployment
-      - name: Remove branch from rc_queue.json after deployment
+      # Step 12: Create and update queue on 'remove' branch
+      - name: Create remove branch and update queue
         run: |
           branch="${{ env.branch }}"
-          # Remove the first branch (FIFO) from the queue (rc_queue.json)
+          rc_description=$(echo "$branch" | sed 's|.*/||')
+          remove_branch="remove/$rc_description"
+          git checkout -b $remove_branch
+
+          # Update the queue by removing the current branch
           jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
           git add rc_queue.json
           git commit -m "Removed $branch from rc_queue.json after successful deployment"
-          git push origin main
-          echo "Successfully deployed and removed branch from rc_queue.json"
+          git push origin $remove_branch
+
+      # Step 13: Create a pull request for the remove branch
+      - name: Create a pull request for remove branch
+        run: |
+          remove_branch="${{ env.remove_branch }}"
+          pr_response=$(gh pr create --base master --head $remove_branch --title "Remove $branch from rc_queue" --body "Automated PR for removing $branch from the queue.")
+          pr_url=$(echo "$pr_response" | grep 'http' | awk '{print $1}')
+          echo "pr_url=$pr_url" >> $GITHUB_ENV
+
+      # Step 14: Merge remove branch pull request
+      - name: Merge pull request for remove branch
+        if: ${{ env.pr_url }}
+        run: |
+          pr_url="${{ env.pr_url
