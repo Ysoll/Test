@@ -163,35 +163,22 @@ jobs:
           pr_url="${{ env.pr_url }}"
           gh pr merge --auto --delete-branch --squash "$pr_url"
 
-      # Step 12: Create and update queue on 'remove' branch
-      - name: Create remove branch and update queue
+      # Step 12: Create and update queue on 'remove' branch from origin/master
+      - name: Create remove branch from master and update queue
         run: |
           branch="${{ env.branch }}"
           rc_description=$(echo "$branch" | sed 's|.*/||')
           remove_branch="remove/$rc_description"
 
-          # Check if the remove branch exists; if not, create it
+          # Create the remove branch from origin/master
           git fetch origin
-          if git show-ref --verify --quiet refs/heads/$remove_branch; then
-            echo "Branch $remove_branch already exists, pulling latest changes."
-            git checkout "$remove_branch"
-            git pull origin "$remove_branch"  # Pull the latest changes from the remote branch
+          git checkout -b "$remove_branch" origin/master  # Create the remove branch from origin/master
 
-            # Make sure there are changes (like updating the queue)
-            jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
-            git add rc_queue.json
-            git commit -m "Removed $branch from rc_queue.json after successful deployment"
-            git push origin "$remove_branch"
-          else
-            echo "Branch $remove_branch doesn't exist. Creating the branch."
-            git checkout -b "$remove_branch"
-
-            # Make sure there are changes (like updating the queue)
-            jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
-            git add rc_queue.json
-            git commit -m "Removed $branch from rc_queue.json after successful deployment"
-            git push origin "$remove_branch"
-          fi
+          # Make changes (e.g., updating rc_queue.json)
+          jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
+          git add rc_queue.json
+          git commit -m "Removed $branch from rc_queue.json after successful deployment"
+          git push origin "$remove_branch"
 
       # Step 13: Create a pull request for the remove branch
       - name: Create a pull request for remove branch
