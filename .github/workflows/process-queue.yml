@@ -189,4 +189,5 @@ jobs:
       - name: Merge pull request for remove branch
         if: ${{ env.pr_url }}
         run: |
-          pr_url="${{ env.pr_url
+          pr_url="${{ env.pr_url }}"
+          gh pr merge --auto --delete-branch --squash "$pr_url"
