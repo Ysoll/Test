@@ -173,7 +173,15 @@ jobs:
           # Check if the remove branch exists; if not, create it
           git fetch origin
           if git show-ref --verify --quiet refs/heads/$remove_branch; then
-            echo "Branch $remove_branch already exists."
+            echo "Branch $remove_branch already exists, pulling latest changes."
+            git checkout "$remove_branch"
+            git pull origin "$remove_branch"  # Pull the latest changes from the remote branch
+
+            # Make sure there are changes (like updating the queue)
+            jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
+            git add rc_queue.json
+            git commit -m "Removed $branch from rc_queue.json after successful deployment"
+            git push origin "$remove_branch"
           else
             echo "Branch $remove_branch doesn't exist. Creating the branch."
             git checkout -b "$remove_branch"
