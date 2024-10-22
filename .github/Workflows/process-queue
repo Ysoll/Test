@@ -2,101 +2,199 @@ name: Process Deployment Queue
 
 on:
   schedule:
-    - cron: "*/1 * * * *"  # Runs every 10 minutes
-  workflow_dispatch:         # Allows manual triggering
+    # Runs every 30 minutes from 9 AM to 5 PM (NL time) from Monday to Friday
+    - cron: "0,30 8-16 * * 1-5"  # Adjusted for CET/CEST timezone (UTC)
+  workflow_dispatch:  # Allows manual triggering
 
 jobs:
   process-queue:
     runs-on: ubuntu-latest
 
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      JENKINS_URL: "https://4f8a-188-25-114-173.ngrok-free.app/job/JenkinsTest/"  # ngrok URL for Jenkins
+      JENKINS_USER: ${{ secrets.JENKINS_USER }}  # Store Jenkins user credentials
+      JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}  # Store Jenkins API token
+
     steps:
-      # Step 1: Checkout the repository
-      - name: Checkout Repository
+      # Step 1: Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v2
 
-      # Step 2: Pick the first RC branch from the queue
-      - name: Pick RC Branch from Queue (FIFO)
-        id: pick_branch
+      # Step 2: Set up Git user identity
+      - name: Set up Git user
+        run: |
+          git config --global user.name "Ysoll"
+          git config --global user.email "voda.cristian94@gmail.com"
+
+      # Step 3: Configure Git to use GITHUB_TOKEN for authentication
+      - name: Set up Git authentication
+        run: |
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
+      # Step 4: Read queue and get the first RC branch (FIFO)
+      - name: Read queue and get the first RC branch
+        id: get_queue
         run: |
           if [ ! -s rc_queue.json ]; then
             echo "No branches in the queue"
             exit 0
           fi
-          rc_branch=$(head -n 1 rc_queue.json)
-          echo "Picked RC branch: $rc_branch"
-          sed -i '1d' rc_queue.json
-          git add rc_queue.json
-          git commit -m "Processing $rc_branch and removing it from the queue"
-          git push origin HEAD
-          echo "::set-output name=rc_branch::$rc_branch"
+          queue_branch=$(jq -r '.queue[0]' rc_queue.json)
+          echo "Picked branch: $queue_branch"
+          echo "branch=$queue_branch" >> $GITHUB_ENV
 
-      # Step 3: Sync RC Branch with Master
-      - name: Sync RC Branch with Master
+      # Step 5: Sync remote RC branch with master
+      - name: Sync remote RC branch with master
+        id: merge_master
         run: |
-          rc_branch="${{ steps.pick_branch.outputs.rc_branch }}"
-          git checkout $rc_branch
+          branch="${{ env.branch }}"
+          set +e  # Disable automatic exit on error
+
+          # Fetch all branches from origin
           git fetch origin
-          git merge origin/master --no-edit
-          if [ $? -ne 0 ]; then
-            echo "Merge conflict, aborting."
+
+          # Check if the branch exists in origin, and work with the remote branch directly
+          if git ls-remote --heads origin $branch | grep $branch; then
+            echo "Remote branch $branch exists, checking it out."
+            git checkout -b $branch origin/$branch
+            git pull --rebase origin $branch || exit 1
+          else
+            echo "Remote branch $branch does not exist, creating it."
+            git checkout -b $branch
+          fi
+
+          # Push the branch to remote
+          git push origin $branch || exit 1
+
+          # Merge master into the branch with the "theirs" strategy
+          git fetch origin master
+          git merge -X theirs origin/master --no-edit --allow-unrelated-histories || {
+              echo "Merge conflict detected in branch: $branch, aborting."
+              echo "conflict=true" >> $GITHUB_ENV
+              git merge --abort  # Abort the merge in case of conflict
+              exit 1
+          }
+
+          echo "conflict=false" >> $GITHUB_ENV
+        continue-on-error: true  # Allow the workflow to continue even if there's an error
+
+      # Step 6: Handle merge conflict and skip to the next branch
+      - name: Skip to the next branch if conflict
+        if: ${{ env.conflict == 'true' }}
+        run: |
+          branch="${{ env.branch }}"
+          jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
+          git add rc_queue.json
+          git commit -m "Removed $branch due to merge conflict"
+          git push origin main
+          echo "Skipped branch: $branch due to conflict, picking the next branch."
+
+      # Step 7: Process the next branch if no conflict
+      - name: Continue with next branch if no conflict
+        if: ${{ env.conflict == 'false' }}
+        run: |
+          echo "Successfully processed branch: ${{ env.branch }}"
+          # Continue your deployment or next steps
+
+      # Step 8: Create release branch from synced RC branch with correct naming convention
+      - name: Create release branch
+        id: create_release
+        if: ${{ env.conflict == 'false' }}
+        run: |
+          branch="${{ env.branch }}"
+          # Extract the RC branch description (everything after the last "/")
+          rc_description=$(echo "$branch" | sed 's|.*/||')
+          # Get current date in yyyy-mm-dd format
+          date=$(date +'%Y-%m-%d')
+          # Form release branch name: release/fast/yyyy-mm-dd_rc_description
+          release_branch="release/fast/$date_$rc_description"
+          echo "Creating release branch: $release_branch"
+
+          # Check if release branch already exists on remote
+          if git ls-remote --heads origin $release_branch | grep $release_branch; then
+            echo "Remote release branch $release_branch exists, pulling latest changes."
+            git checkout $release_branch
+            git pull --rebase origin $release_branch || exit 1
+          else
+            echo "Release branch $release_branch does not exist, creating it."
+            git checkout -b $release_branch
+          fi
+
+          # Push the release branch
+          git push origin $release_branch || exit 1
+
+          echo "release_branch=$release_branch" >> $GITHUB_ENV
+
+      # Step 9: Trigger Jenkins deployment using release branch
+      - name: Trigger Jenkins deployment
+        if: ${{ env.release_branch }}
+        run: |
+          release_branch="${{ env.release_branch }}"
+          jenkins_url="${{ env.JENKINS_URL }}"
+          echo "Triggering Jenkins with branch: $release_branch"  # Debugging output
+          if [ -z "$jenkins_url" ] || [ -z "$release_branch" ]; then
+            echo "Jenkins URL or release branch is missing."
             exit 1
           fi
 
-      # Step 4: Create a Release Branch (release/fast/YYYYMMDD-<rc-branch-name>)
-      - name: Create Release Branch
-        id: create_release_branch
+          # Trigger Jenkins job
+          curl -X POST "$jenkins_url/buildWithParameters" \
+            --user "${{ env.JENKINS_USER }}:${{ env.JENKINS_TOKEN }}" \
+            --data-urlencode "BRANCH_NAME=$release_branch" || {
+              echo "Failed to trigger Jenkins job for $release_branch"
+              exit 1
+          }
+
+      # Step 10: Create a pull request from the release branch to master
+      - name: Create a pull request
+        if: ${{ env.release_branch }}
+        id: create_pr
         run: |
-          rc_branch="${{ steps.pick_branch.outputs.rc_branch }}"
-          date=$(date +'%Y%m%d')  # Get current date
-          release_branch="release/fast/$date-$rc_branch"
-          
-          echo "Creating release branch: $release_branch"
-          
-          # Create and push the new release branch
-          git checkout -b $release_branch
-          git push origin $release_branch
-          echo "::set-output name=release_branch::$release_branch"
+          release_branch="${{ env.release_branch }}"
+          pr_response=$(gh pr create --base master --head "$release_branch" --title "Merge $release_branch into master" --body "Automated PR for merging $release_branch into master.")
+          pr_url=$(echo "$pr_response" | grep 'http' | awk '{print $1}')
+          echo "pr_url=$pr_url" >> $GITHUB_ENV
 
-      # Step 5: Trigger Jenkins Deployment using Release Branch
-      - name: Trigger Jenkins Job
-        uses: appleboy/jenkins-action@v1.1.0
-        with:
-          url: 'http://localhost:8080/job/JenkinsTest/buildWithParameters'
-          username: 'admin'
-          token: '317332011d95481dbef44452c153ec6b'
-          parameters: BRANCH_NAME=${{ steps.create_release_branch.outputs.release_branch }}
-
-      # Step 6: Wait for Jenkins Deployment to Complete
-      - name: Wait for Jenkins Job to Complete
-        uses: appleboy/jenkins-action@v1.1.0
-        with:
-          url: 'http://localhost:8080/job/JenkinsTest/buildWithParameters'
-          username: 'admin'
-          token: '317332011d95481dbef44452c153ec6b'
-
-      # Step 7: Merge Release Branch into Master after successful deployment
-      - name: Merge Release Branch into Master
+      # Step 11: Merge the pull request
+      - name: Merge pull request
+        if: ${{ env.pr_url }}
         run: |
-          release_branch="${{ steps.create_release_branch.outputs.release_branch }}"
-          git checkout master
-          git pull origin master
-          git merge $release_branch --no-edit
-          git push origin master
+          pr_url="${{ env.pr_url }}"
+          gh pr merge --auto --delete-branch --squash "$pr_url"
 
-      # Step 8: Mark RC Branch as Released and Cleanup
-      - name: Mark RC Branch as Released
+      # Step 12: Create and update queue on 'remove' branch
+      - name: Create remove branch and update queue
         run: |
-          rc_branch="${{ steps.pick_branch.outputs.rc_branch }}"
-          echo "$rc_branch is now released."
-          
-          # Optionally create a log or mark it as released (e.g., update a file)
-          echo "$rc_branch: released on $(date)" >> release-log.txt
-          git add release-log.txt
-          git commit -m "Mark $rc_branch as released"
-          git push origin HEAD
+          branch="${{ env.branch }}"
+          rc_description=$(echo "$branch" | sed 's|.*/||')
+          remove_branch="remove/$rc_description"
 
-      # Step 9: Cleanup: Optionally delete the release branch from remote
-      - name: Delete Release Branch from Remote
+          # Check if the remove branch exists; if not, create it
+          git fetch origin
+          if git show-ref --verify --quiet refs/heads/$remove_branch; then
+            echo "Branch $remove_branch already exists."
+          else
+            echo "Branch $remove_branch doesn't exist. Creating the branch."
+            git checkout -b "$remove_branch"
+
+            # Make sure there are changes (like updating the queue)
+            jq 'del(.queue[0])' rc_queue.json > temp.json && mv temp.json rc_queue.json
+            git add rc_queue.json
+            git commit -m "Removed $branch from rc_queue.json after successful deployment"
+            git push origin "$remove_branch"
+          fi
+
+      # Step 13: Create a pull request for the remove branch
+      - name: Create a pull request for remove branch
         run: |
-          release_branch="${{ steps.create_release_branch.outputs.release_branch }}"
-          git push origin --delete $release_branch
+          remove_branch="remove/$rc_description"
+
+          # Create the pull request if the branch exists and has changes
+          if git show-ref --verify --quiet refs/heads/$remove_branch; then
+            pr_response=$(gh pr create --base master --head "$remove_branch" --title "Remove $branch from rc_queue" --body "Automated PR for removing $branch from the queue.")
+            pr_url=$(echo "$pr_response" | grep 'http' | awk '{print $1}')
+            echo "pr_url=$pr_url" >> $GITHUB_ENV
+          else
+            echo "Error: Branch $remove_branch does not exist."
+          fi
