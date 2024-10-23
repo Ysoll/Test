@@ -1,0 +1,57 @@
+name: Enable Auto Merge on Pull Request
+
+on:
+  pull_request:
+    types: [opened, synchronize, labeled]  # Trigger when PR is opened, updated, or labeled
+
+jobs:
+  enable-auto-merge:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      # Step 2: Install GitHub CLI
+      - name: Install GitHub CLI
+        run: sudo apt-get install gh -y
+
+      # Step 3: Enable auto-merge via GraphQL API
+      - name: Enable auto-merge via GraphQL
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get the PR ID from GitHub event
+          pr_id=$(gh pr view ${{ github.event.pull_request.number }} --json id --jq .id)
+          
+          # Define the GraphQL mutation
+          graphql_query='
+          mutation {
+            enablePullRequestAutoMerge(input: {
+              pullRequestId: "'"$pr_id"'",
+              mergeMethod: SQUASH  # You can change to MERGE or REBASE as needed
+            }) {
+              pullRequest {
+                id
+                autoMergeRequest {
+                  enabledAt
+                  enabledBy {
+                    login
+                  }
+                }
+              }
+            }
+          }'
+
+          # Execute the GraphQL query using curl
+          curl -X POST \
+            -H "Authorization: bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data '{"query": "'"$graphql_query"'"}' \
+            https://api.github.com/graphql
+
+      # Step 4: Check the result
+      - name: Confirm auto-merge enabled
+        run: |
+          echo "Auto-merge has been enabled for PR #${{ github.event.pull_request.number }}."
