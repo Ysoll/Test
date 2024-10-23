@@ -3,7 +3,7 @@ name: Process Deployment Queue
 on:
   schedule:
     # Runs every 30 minutes from 9 AM to 5 PM (NL time) from Monday to Friday
-    - cron: "0,30 8-16 * * 1-5"  # Adjusted for CET/CEST timezone (UTC)
+   # - cron: "0,30 8-16 * * 1-5"  # Adjusted for CET/CEST timezone (UTC)
   workflow_dispatch:  # Allows manual triggering
 
 jobs:
